@@ -6,8 +6,8 @@
 #include <DHT.h>
 
 // Replace with your network credentials
-const char *ssid = "AXE-PATRAS-2";
-const char *password = "mavakrvi";
+const char *ssid = "";
+const char *password = "";
 
 #define DHTPIN 12 // Digital pin connected to the DHT sensor - GPIO12 = D6
 

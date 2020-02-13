@@ -1,15 +1,17 @@
 #include <ESP8266WiFi.h>
 #include <Hash.h>
-#include <ESPAsyncTCP.h>
-#include <ESPAsyncWebServer.h>
 #include <Adafruit_Sensor.h>
 #include <DHT.h>
+#include <ESP8266HTTPClient.h>
 
-// Replace with your network credentials
+// TODO: Replace with correct values
 const char *ssid = "";
 const char *password = "";
+const char *token = "";
+const char *url = "";
 
-#define DHTPIN 12 // Digital pin connected to the DHT sensor - GPIO12 = D6
+#define DHTPIN 12    // Digital pin connected to the DHT sensor - GPIO12 = D6
+#define ARRAY_MAX 60 // Max values to store in order to find an average and store in DB.
 
 // Uncomment the type of sensor in use:
 #define DHTTYPE DHT11 // DHT 11
@@ -18,95 +20,33 @@ const char *password = "";
 
 DHT dht(DHTPIN, DHTTYPE);
 
-// current temperature & humidity, updated in loop()
-float t = 0.0;
-float h = 0.0;
+// hourly temperature & humidity, updated in loop()
+float hourly_temp = 0.0;
+float hourly_hum = 0.0;
 
-// Create AsyncWebServer object on port 80
-AsyncWebServer server(80);
+// minute array of temperature & humidity
+float minute_temp[ARRAY_MAX];
+float minute_hum[ARRAY_MAX];
+unsigned int temp_arr_index = 0;
+unsigned int hum_arr_index = 0;
 
 // Generally, you should use "unsigned long" for variables that hold time
 // The value will quickly become too large for an int to store
 unsigned long previousMillis = 0; // will store last time DHT was updated
 
-// Updates DHT readings every 10 seconds
-const long interval = 10000;
+// Updates DHT readings every 60 seconds
+const long interval = 60000;
 
-const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
-  <style>
-    html {
-     font-family: Arial;
-     display: inline-block;
-     margin: 0px auto;
-     text-align: center;
-    }
-    h2 { font-size: 3.0rem; }
-    p { font-size: 3.0rem; }
-    .units { font-size: 1.2rem; }
-    .dht-labels{
-      font-size: 1.5rem;
-      vertical-align:middle;
-      padding-bottom: 15px;
-    }
-  </style>
-</head>
-<body>
-  <h2>My Home DHT Server</h2>
-  <p>
-    <i class="fas fa-thermometer-half" style="color:#059e8a;"></i>
-    <span class="dht-labels">Temperature</span>
-    <span id="temperature">%TEMPERATURE%</span>
-    <sup class="units">&deg;C</sup>
-  </p>
-  <p>
-    <i class="fas fa-tint" style="color:#00add6;"></i>
-    <span class="dht-labels">Humidity</span>
-    <span id="humidity">%HUMIDITY%</span>
-    <sup class="units">%</sup>
-  </p>
-</body>
-<script>
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("temperature").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/temperature", true);
-  xhttp.send();
-}, 10000 ) ;
-
-setInterval(function ( ) {
-  var xhttp = new XMLHttpRequest();
-  xhttp.onreadystatechange = function() {
-    if (this.readyState == 4 && this.status == 200) {
-      document.getElementById("humidity").innerHTML = this.responseText;
-    }
-  };
-  xhttp.open("GET", "/humidity", true);
-  xhttp.send();
-}, 10000 ) ;
-</script>
-</html>)rawliteral";
-
-// Replaces placeholder with DHT values
-String processor(const String &var)
+float average(const float v[], int n)
 {
-  //Serial.println(var);
-  if (var == "TEMPERATURE")
+  float sum = 0.0f;
+
+  for (int i = 0; i < n; i++)
   {
-    return String(t);
+    sum += v[i]; //sum all the numbers in the vector v
   }
-  else if (var == "HUMIDITY")
-  {
-    return String(h);
-  }
-  return String();
+
+  return sum / n;
 }
 
 void setup()
@@ -126,33 +66,21 @@ void setup()
 
   // Print ESP8266 Local IP Address
   Serial.println(WiFi.localIP());
-
-  // Route for root / web page
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", index_html, processor);
-  });
-  server.on("/temperature", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/plain", String(t).c_str());
-  });
-  server.on("/humidity", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/plain", String(h).c_str());
-  });
-
-  // Start server
-  server.begin();
 }
 
 void loop()
 {
   unsigned long currentMillis = millis();
+  boolean sendData = false;
+
   if (currentMillis - previousMillis >= interval)
   {
     // save the last time you updated the DHT values
     previousMillis = currentMillis;
+
     // Read temperature as Celsius (the default)
     float newT = dht.readTemperature();
-    // Read temperature as Fahrenheit (isFahrenheit = true)
-    //float newT = dht.readTemperature(true);
+
     // if temperature read failed, don't change t value
     if (isnan(newT))
     {
@@ -160,11 +88,26 @@ void loop()
     }
     else
     {
-      t = newT;
-      Serial.println(t);
+      if (temp_arr_index < ARRAY_MAX)
+      {
+        minute_temp[temp_arr_index++] = newT;
+        Serial.print("New Temperature ");
+        Serial.println(newT);
+      }
+      else
+      {
+        // Handle a full array.
+        temp_arr_index = 0;
+        sendData = true;
+        hourly_temp = average(minute_temp, ARRAY_MAX);
+        Serial.print("Average Temperature ");
+        Serial.println(hourly_temp);
+      }
     }
+
     // Read Humidity
     float newH = dht.readHumidity();
+
     // if humidity read failed, don't change h value
     if (isnan(newH))
     {
@@ -172,8 +115,39 @@ void loop()
     }
     else
     {
-      h = newH;
-      Serial.println(h);
+      if (hum_arr_index < ARRAY_MAX)
+      {
+        minute_hum[hum_arr_index++] = newH;
+        Serial.print("New Humidity ");
+        Serial.println(newH);
+      }
+      else
+      {
+        // Handle a full array.
+        hum_arr_index = 0;
+        sendData = true;
+        hourly_hum = average(minute_hum, ARRAY_MAX);
+        Serial.print("Average Humidity ");
+        Serial.println(hourly_hum);
+      }
+    }
+
+    if (sendData)
+    {
+      HTTPClient http; //Declare object of class HTTPClient
+
+      //Post Data
+      String postData = "token=" + String(token) + "&date=" + currentMillis + "&temperature=" + hourly_temp + "&humidity=" + hourly_hum;
+      http.begin(url);                                                     //Specify request destination
+      http.addHeader("Content-Type", "application/x-www-form-urlencoded"); //Specify content-type header
+
+      int httpCode = http.POST(postData); //Send the request
+      String payload = http.getString();  //Get the response payload
+
+      Serial.println(httpCode); //Print HTTP return code
+      Serial.println(payload);  //Print request response payload
+
+      http.end(); //Close connection
     }
   }
 }

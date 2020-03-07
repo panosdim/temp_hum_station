@@ -51,8 +51,8 @@ float average(const float v[], int n)
 
 void setup()
 {
-  pinMode(LED_BUILTIN, OUTPUT);     // Initialize the LED_BUILTIN pin as an output
-  digitalWrite(LED_BUILTIN, LOW);   // Turn the LED on by making the voltage LOW
+  pinMode(LED_BUILTIN, OUTPUT);   // Initialize the LED_BUILTIN pin as an output
+  digitalWrite(LED_BUILTIN, LOW); // Turn the LED on by making the voltage LOW
 
   // Serial port for debugging purposes
   Serial.begin(115200);
@@ -140,7 +140,7 @@ void loop()
       HTTPClient http; //Declare object of class HTTPClient
 
       //Post Data
-      String postData = "token=" + String(token) + "&date=" + currentMillis + "&temperature=" + hourly_temp + "&humidity=" + hourly_hum;
+      String postData = "token=" + String(token) + "&temperature=" + hourly_temp + "&humidity=" + hourly_hum;
       http.begin(url);                                                     //Specify request destination
       http.addHeader("Content-Type", "application/x-www-form-urlencoded"); //Specify content-type header
 

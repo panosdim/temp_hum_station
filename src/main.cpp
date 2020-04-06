@@ -97,7 +97,7 @@ void loop()
         Serial.print("New Temperature ");
         Serial.println(newT);
       }
-      else
+      if (temp_arr_index == ARRAY_MAX)
       {
         // Handle a full array.
         temp_arr_index = 0;
@@ -124,7 +124,7 @@ void loop()
         Serial.print("New Humidity ");
         Serial.println(newH);
       }
-      else
+      if (hum_arr_index == ARRAY_MAX)
       {
         // Handle a full array.
         hum_arr_index = 0;
